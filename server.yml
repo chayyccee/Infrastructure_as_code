@@ -1,5 +1,5 @@
 Description: >
-  To deploy SecurityGroup, LaunchConfiguration, AutoScalingGroup,
+  To deploy SecurityGroup,Elastic IP, LaunchConfiguration, AutoScalingGroup,
   LoadBalancer, Listener, ListenerRule, TargetGroup.
 Parameters:
   EnvironmentName:
@@ -8,6 +8,8 @@ Parameters:
   AMItoUse:
     Description: AMI to use for our base image
     Type: String
+    Default: ami-005de95e8ff495156
+
 Resources:
   # IAM Role to allow EC2 Session Manager to access our server
   RoleForS3ccess:
@@ -23,16 +25,21 @@ Resources:
             Action:
               - 'sts:AssumeRole'
       Path: /
-      Policies:
-        - PolicyName: root
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action: '*'
-                Resource: '*'
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+  Policies:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: 'root'
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: Allow
+          Action:
+          - "ssm:Get*"
+          - "s3:Get*"
+          Resource: '*'
+      Roles:
+      - !Ref RoleForS3ccess
+
 # Instance Profile
   ServerInstanceProfile:
     Type: "AWS::IAM::InstanceProfile"
@@ -40,6 +47,7 @@ Resources:
       Path: "/"
       Roles:
         - !Ref RoleForS3ccess
+
   LBSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -55,6 +63,7 @@ Resources:
         FromPort: 80
         ToPort: 80
         CidrIp: 0.0.0.0/0
+
   WebServerSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -74,66 +83,50 @@ Resources:
         FromPort: 0
         ToPort: 65535
         CidrIp: 0.0.0.0/0
-  WebAppLaunchConfig:
-    Type: AWS::AutoScaling::LaunchConfiguration
+
+  ##
+
+  ElasticIp:
+    Type: AWS::EC2::EIP
     Properties:
+      Domain: !Sub "${EnvironmentName}-VPCID"
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    DependsOn:
+    - WebServerSecGroup
+    Properties:
+      IamInstanceProfile: !Ref ServerInstanceProfile
+      ImageId: !Ref AMItoUse
+      InstanceType: t3.small
+      #SecurityGroupIds: !Ref WebServerSecGroup
+      #SubnetId: 
+      #  Fn::ImportValue: 
+      ##    Sub "${EnvironmentName}-PUB1-SN"
+      BlockDeviceMappings:
+        - DeviceName: "/dev/sdk"
+          Ebs:
+            VolumeSize: 10
+            DeleteOnTermination: true
+            VolumeType: "gp2"
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
-          sudo apt-get update -y
-          sudo apt-get install apache2 -y
-          sudo systemctl start apache2.service          
-      # ToDo: AMI ID of Ubuntu Linux machine. Too get one, try creating a VM from the web console. 
-      ImageId: ami-0747bdcabd34c712a
-      IamInstanceProfile: !Ref ServerInstanceProfile
-      # ToDo: Change the key-pair name, as applicable to you. 
-      KeyName: nd9990_keypair
-      SecurityGroups: 
-      - !Ref WebServerSecGroup
-      InstanceType: t3.medium
-      BlockDeviceMappings:
-      - DeviceName: /dev/sda1
-        Ebs:
-          VolumeSize: 10
-  WebAppGroup:
-    Type: AWS::AutoScaling::AutoScalingGroup
+          apt-get update -y
+          apt-get install unzip awscli -y
+          
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Host
+
+  EC2InstanceEIPAssociation:
+    Type: AWS::EC2::EIPAssociation
     Properties:
-      VPCZoneIdentifier:
-      - Fn::ImportValue: 
-          !Sub "${EnvironmentName}-PRIV-NETS"
-      LaunchConfigurationName: !Ref WebAppLaunchConfig
-      MinSize: '3'
-      MaxSize: '5'
-      TargetGroupARNs:
-      - !Ref WebAppTargetGroup
-  WebAppLB:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Properties:
-      Subnets:
-      - Fn::ImportValue: !Sub "${EnvironmentName}-PUB1-SN"
-      - Fn::ImportValue: !Sub "${EnvironmentName}-PUB2-SN"
-      SecurityGroups:
-      - !Ref LBSecGroup
-  Listener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      DefaultActions:
-      - Type: forward
-        TargetGroupArn: !Ref WebAppTargetGroup
-      LoadBalancerArn: !Ref WebAppLB
-      Port: 80
-      Protocol: HTTP
-  ALBListenerRule:
-      Type: AWS::ElasticLoadBalancingV2::ListenerRule
-      Properties:
-        Actions:
-        - Type: forward
-          TargetGroupArn: !Ref 'WebAppTargetGroup'
-        Conditions:
-        - Field: path-pattern
-          Values: [/]
-        ListenerArn: !Ref 'Listener'
-        Priority: 1
+      InstanceId: !Ref EC2Instance
+      AllocationId: !GetAtt ElasticIp.AllocationId
+
+##
+
   WebAppTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -145,12 +138,116 @@ Resources:
       Port: 8080
       Protocol: HTTP
       UnhealthyThresholdCount: 5
-      VpcId: 
-        Fn::ImportValue:
-          Fn::Sub: "${EnvironmentName}-VPCID"
-#Outputs:
+      VpcId: !Sub ${EnvironmentName}-VPCID
+
+  WebAppLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      #UserData:
+      #  Fn::Base64: !Sub |
+      #    #!/bin/bash
+      #    sudo apt-get update -y
+      #    sudo apt-get install apache2 -y
+      #    sudo systemctl start apache2.service
+      UserData: !Base64 |
+        #!/bin/bash -x
+        apt-get update -y
+        apt-get install apache2 -y
+        systemctl start apache2.service
+      EbsOptimized: true          
+      ## ToDo: AMI ID of Ubuntu Linux machine. Too get one, try creating a VM from the web console. 
+      ImageId: !Ref AMItoUse
+      IamInstanceProfile: !Ref ServerInstanceProfile
+      # ToDo: Change the key-pair name, as applicable to you. 
+      # KeyName: nd9990_keypair
+      SecurityGroups: 
+      - !Ref WebServerSecGroup
+      InstanceType: t3.medium
+      BlockDeviceMappings:
+      - DeviceName: /dev/sdk
+        Ebs:
+          VolumeSize: 10
+          DeleteOnTermination: true
+          VolumeType: "gp2"
+
+  WebAppGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+       - Fn::ImportValue: !Sub ${EnvironmentName}-PRIV-NETS
+      LaunchConfigurationName: !Ref WebAppLaunchConfig
+      DesiredCapacity: '2'
+      MinSize: '3'
+      MaxSize: '5'
+      TargetGroupARNs:
+      - !Ref WebAppTargetGroup
+    UpdatePolicy:
+      AutoScalingReplacingUpdate:
+        WillReplace: True
+
+  WebAppScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref WebAppGroup
+      Cooldown: '300'
+      ScalingAdjustment: 1
+
+  #ScalingDown
+  WebAppScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref WebAppGroup
+      Cooldown: '300'
+      ScalingAdjustment: -1
+
+  WebAppLB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Subnets:
+      - Fn::ImportValue: !Sub ${EnvironmentName}-PUB1-SN
+      - Fn::ImportValue: !Sub ${EnvironmentName}-PUB2-SN
+      SecurityGroups:
+      - !Ref LBSecGroup
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref WebAppTargetGroup
+      LoadBalancerArn: !Ref WebAppLB
+      Port: 80
+      Protocol: HTTP
+
+  ALBListenerRule:
+      Type: AWS::ElasticLoadBalancingV2::ListenerRule
+      Properties:
+        Actions:
+        - Type: forward
+          TargetGroupArn: !Ref 'WebAppTargetGroup'
+        Conditions:
+        - Field: path-pattern
+          Values: [/]
+        ListenerArn: !Ref 'Listener'
+        Priority: 1
+
+Outputs:
+
 #  WebAppLBURL:
 #    Description: The Load Balancer URL
 #    Value: !Join ["", ["http://", !GetAtt WebAppLB.DNSName,]]
 #    Export:
 #      Name: !Sub ${EnvironmentName}-DNS-NAME
+  RoleForS3ccess:
+    Description: IAM role for app
+    Value: !Ref RoleForS3ccess
+    Export:
+      Name: !Sub ${EnvironmentName}-ROL-IAM
+
+  InstanceProfile:
+    Description: This is the instance profile of the role
+    Value: !Ref ServerInstanceProfile
+    Export:
+      Name: !Sub ${EnvironmentName}-INS-PROFILE
