@@ -5,10 +5,16 @@ Parameters:
   EnvironmentName:
     Description: An environment name that will be prefixed to resource names
     Type: String
+
   AMItoUse:
     Description: AMI to use for our base image
     Type: String
     Default: ami-005de95e8ff495156
+
+  NameBucket:
+    Description: Unique name of the S3 bucket where stores the files to deploy
+    Type: String
+    Default: s3-658942388635-bucket
 
 Resources:
   # IAM Role to allow EC2 Session Manager to access our server
@@ -150,10 +156,19 @@ Resources:
       #    sudo apt-get install apache2 -y
       #    sudo systemctl start apache2.service
       UserData: !Base64 |
-        #!/bin/bash -x
+        #!/bin/bash
         apt-get update -y
         apt-get install apache2 -y
+
+        aws ssm get-parameter --name udagramWebappKey --with-decryption --output text --query Parameter.Value --region ${AWS::Region} > authorized_keys
+        cp ./authorized_keys /home/ubuntu/.ssh/
+        chmod 700 /home/ubuntu/.ssh/authorized_keys
+
         systemctl start apache2.service
+        sudo rm /var/www/html/index.html
+        sudo aws s3 cp ${S3CodeRepo} /var/www/html
+        sudo unzip /var/www/html/udagram.zip -d /var/www/html
+        systemctl restart apache2.service
       EbsOptimized: true          
       ## ToDo: AMI ID of Ubuntu Linux machine. Too get one, try creating a VM from the web console. 
       ImageId: !Ref AMItoUse
@@ -233,6 +248,11 @@ Resources:
         ListenerArn: !Ref 'Listener'
         Priority: 1
 
+  WebAppBucketS3:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref NameBucket
+
 Outputs:
 
   WebAppLBURL:
@@ -258,3 +278,14 @@ Outputs:
     Value: !Ref ElasticIp
     Export:
       Name: !Sub ${EnvironmentName}-PUBLIC-IP
+
+  DataBucket:
+    Value: !Ref WebAppBucketS3
+    Description: Udagram bucket that stores web archive
+    Export:
+      Name: !Sub ${EnvironmentName}-S3-BK
+
+  DataBucketARN:
+    Value: !Join ["", ["arn:aws:s3:::", !Ref "WebAppBucketS3", "/*"]]
+    Export:
+      Name: !Sub ${EnvironmentName}-S3-BK-ARN
