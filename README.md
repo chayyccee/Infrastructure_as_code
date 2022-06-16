@@ -9,6 +9,9 @@ Students may use a JSON file for increasing the generic nature of the YAML code.
 
 In YAML code, the `${EnvironmentName}` would be substituted with `UdacityProject` accordingly.
 
+The app is deployed in this [link](https://s3-12345678-bucket.s3.us-west-2.amazonaws.com/index.html) or
+[https://s3-12345678-bucket.s3.us-west-2.amazonaws.com/index.html](https://s3-12345678-bucket.s3.us-west-2.amazonaws.com/index.html)
+
 ## Task
 
 ### Scenario
@@ -35,3 +38,9 @@ Udagram communicates on the default HTTP Port: `80`, so your servers will need t
 The load balancer should allow all public traffic `(0.0.0.0/0)` on port `80` inbound, which is the default HTTP port. Outbound, it will only be using port `80` to reach the internal servers.
 The application needs to be deployed into private subnets with a Load Balancer located in a public subnet.
 One of the output exports of the CloudFormation script should be the public URL of the LoadBalancer. Bonus points if you add `http://` in front of the load balancer DNS Name in the output, for convenience.
+
+# N.B
+
+This is rough work for the purpose of this project work. Don't pack up the resources like i did.
+ensure u separate the resources(network, s3, server, IAM, etc) in different yml and paramter json files for ease. Then 
+each resource example for IAM, you have iam.yml and iam-params.json, for s3, you have s3.yml and s3-prams.json. Then you can update as required.

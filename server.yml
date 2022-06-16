@@ -11,13 +11,17 @@ Parameters:
     Type: String
     Default: ami-005de95e8ff495156
 
+  # create aws bucket from console named s3-12345678-bucket
+  # use aws s3 cp application/udagramApp.zip s3://s3-12345678-bucket to upload to the bucket
+
+
   NameBucket:
     Description: Unique name of the S3 bucket where stores the files to deploy
     Type: String
-    Default: s3-658942388635-bucket
+    Default: s3-12345678-bucket
 
 Resources:
-  # IAM Role to allow EC2 Session Manager to access our server
+  # IAM Role to allow EC2 Session Manager to access our server 658942388635
   RoleForS3ccess:
     Type: "AWS::IAM::Role"
     Properties:
